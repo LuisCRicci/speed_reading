@@ -8,6 +8,7 @@ import time
 import sys
 import os
 from tkinter import font
+import subprocess
 
 class PDFVoiceReader:
     def __init__(self, root):
@@ -17,7 +18,15 @@ class PDFVoiceReader:
         self.root.configure(bg='#2c3e50')
         
         # Configurar el motor de voz
-        self.engine = pyttsx3.init()
+        try:
+            self.engine = pyttsx3.init()
+            self.voice_available = True
+        except Exception as e:
+            self.voice_available = False
+            messagebox.showerror("Error de Voz", 
+                               f"Error al inicializar el motor de voz:\n{str(e)}\n\n"
+                               "El programa continuará pero sin funcionalidad de voz.")
+        
         self.is_speaking = False
         self.is_paused = False
         self.current_text = ""
@@ -27,10 +36,41 @@ class PDFVoiceReader:
         self.floating_button = None
         self.last_clipboard = ""
         self.clipboard_monitor_active = True
+        self.clipboard_thread = None
         
         self.setup_ui()
-        self.setup_voice_settings()
+        if self.voice_available:
+            self.setup_voice_settings()
         self.start_clipboard_monitor()
+        
+        # Mostrar instrucciones al inicio
+        self.show_startup_instructions()
+        
+    def show_startup_instructions(self):
+        """Mostrar instrucciones de uso al iniciar"""
+        instructions = """
+🎤 INSTRUCCIONES DE USO:
+
+📄 Para leer PDFs:
+• Haz clic en "Seleccionar PDF"
+• Ajusta velocidad y volumen
+• Presiona "Reproducir"
+
+📝 Para leer texto seleccionado:
+• Selecciona texto en cualquier aplicación
+• Presiona Ctrl+C para copiar
+• Aparecerá un botón flotante "Leer"
+• Haz clic en el botón para escuchar
+
+⚠️ IMPORTANTE: 
+• Ejecuta desde la terminal: python pdf_voice_reader.py
+• Mantén esta ventana abierta
+• El monitoreo del portapapeles está activo
+        """
+        
+        # Mostrar en el área de texto
+        self.text_area.delete(1.0, tk.END)
+        self.text_area.insert(1.0, instructions)
         
     def setup_ui(self):
         # Estilo personalizado
@@ -64,6 +104,15 @@ class PDFVoiceReader:
                               relief=tk.FLAT, padx=20, pady=8,
                               cursor='hand2')
         select_btn.pack(side=tk.RIGHT, padx=(10, 0))
+        
+        # Botón de prueba para el portapapeles
+        test_btn = tk.Button(file_frame, text="🧪 Probar Portapapeles", 
+                            command=self.test_clipboard, 
+                            font=('Arial', 10, 'bold'),
+                            bg='#9b59b6', fg='white', 
+                            relief=tk.FLAT, padx=15, pady=8,
+                            cursor='hand2')
+        test_btn.pack(side=tk.RIGHT, padx=(10, 0))
         
         # Frame de configuración de voz
         voice_frame = tk.LabelFrame(main_frame, text="⚙️ Configuración de Voz", 
@@ -139,19 +188,21 @@ class PDFVoiceReader:
                                   relief=tk.FLAT, padx=10, pady=10)
         info_frame.pack(fill=tk.X, pady=(0, 20))
         
-        info_text = ("Para leer cualquier texto:\n"
+        info_text = ("🔍 Estado del Monitoreo: ACTIVO\n"
+                    "Para leer cualquier texto:\n"
                     "1. Selecciona texto en cualquier aplicación\n"
                     "2. Copia el texto (Ctrl+C)\n"
                     "3. Aparecerá automáticamente un botón flotante 'Leer'\n"
-                    "4. Haz clic en el botón para escuchar el texto")
+                    "4. Haz clic en el botón para escuchar el texto\n\n"
+                    "💡 Consejo: Usa el botón 'Probar Portapapeles' para verificar")
         
-        info_label = tk.Label(info_frame, text=info_text, 
-                             font=('Arial', 10), bg='#34495e', fg='#bdc3c7',
-                             justify=tk.LEFT)
-        info_label.pack()
+        self.info_label = tk.Label(info_frame, text=info_text, 
+                                  font=('Arial', 10), bg='#34495e', fg='#bdc3c7',
+                                  justify=tk.LEFT)
+        self.info_label.pack()
         
         # Área de texto para mostrar contenido
-        text_frame = tk.LabelFrame(main_frame, text="📄 Contenido del PDF", 
+        text_frame = tk.LabelFrame(main_frame, text="📄 Contenido / Instrucciones", 
                                   font=('Arial', 12, 'bold'),
                                   bg='#34495e', fg='#ecf0f1', 
                                   relief=tk.FLAT, padx=10, pady=10)
@@ -164,33 +215,61 @@ class PDFVoiceReader:
         self.text_area.pack(fill=tk.BOTH, expand=True)
         
         # Barra de estado
-        self.status_var = tk.StringVar(value="Listo - Selecciona un PDF para comenzar")
+        self.status_var = tk.StringVar(value="✅ Listo - Monitoreo de portapapeles ACTIVO")
         status_bar = tk.Label(main_frame, textvariable=self.status_var, 
                              font=('Arial', 9), bg='#34495e', fg='#bdc3c7',
                              relief=tk.SUNKEN, anchor=tk.W, padx=10, pady=5)
         status_bar.pack(fill=tk.X, pady=(10, 0))
         
+    def test_clipboard(self):
+        """Probar la funcionalidad del portapapeles"""
+        test_text = "¡Hola! Esta es una prueba del sistema de lectura de texto. Si escuchas este mensaje, todo está funcionando correctamente."
+        
+        try:
+            # Copiar texto de prueba al portapapeles
+            pyperclip.copy(test_text)
+            self.status_var.set("✅ Texto de prueba copiado al portapapeles - Esperando botón flotante...")
+            
+            # Forzar la aparición del botón flotante
+            self.root.after(1000, lambda: self.show_floating_button(test_text))
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al acceder al portapapeles:\n{str(e)}")
+        
     def setup_voice_settings(self):
         """Configurar las opciones iniciales del motor de voz"""
-        voices = self.engine.getProperty('voices')
-        if voices:
-            # Intentar usar una voz en español si está disponible
-            for voice in voices:
-                if 'spanish' in voice.name.lower() or 'es-' in voice.id.lower():
-                    self.engine.setProperty('voice', voice.id)
-                    break
-        
-        self.engine.setProperty('rate', 200)
-        self.engine.setProperty('volume', 0.9)
+        if not self.voice_available:
+            return
+            
+        try:
+            voices = self.engine.getProperty('voices')
+            if voices:
+                # Intentar usar una voz en español si está disponible
+                for voice in voices:
+                    if ('spanish' in voice.name.lower() or 
+                        'es-' in voice.id.lower() or 
+                        'helena' in voice.name.lower() or
+                        'sabina' in voice.name.lower()):
+                        self.engine.setProperty('voice', voice.id)
+                        break
+            
+            self.engine.setProperty('rate', 200)
+            self.engine.setProperty('volume', 0.9)
+        except Exception as e:
+            print(f"Error configurando voz: {e}")
         
     def update_speed(self, value):
         """Actualizar la velocidad de lectura"""
+        if not self.voice_available:
+            return
         speed = int(value)
         self.engine.setProperty('rate', speed)
         self.speed_label.config(text=f"{speed} ppm")
         
     def update_volume(self, value):
         """Actualizar el volumen de lectura"""
+        if not self.voice_available:
+            return
         volume = float(value)
         self.engine.setProperty('volume', volume)
         self.volume_label.config(text=f"{int(volume*100)}%")
@@ -227,7 +306,8 @@ class PDFVoiceReader:
             self.file_label.config(text=f"Archivo: {filename}")
             
             # Habilitar botones
-            self.play_btn.config(state=tk.NORMAL)
+            if self.voice_available:
+                self.play_btn.config(state=tk.NORMAL)
             
             self.status_var.set(f"PDF cargado - {len(pdf_reader.pages)} páginas")
             
@@ -237,6 +317,10 @@ class PDFVoiceReader:
             
     def play_pdf(self):
         """Reproducir el texto del PDF"""
+        if not self.voice_available:
+            messagebox.showerror("Error", "Motor de voz no disponible")
+            return
+            
         if not self.current_text.strip():
             messagebox.showwarning("Advertencia", "No hay texto para reproducir")
             return
@@ -248,7 +332,7 @@ class PDFVoiceReader:
             
     def start_speaking(self, text):
         """Iniciar la lectura en un hilo separado"""
-        if self.is_speaking:
+        if not self.voice_available or self.is_speaking:
             return
             
         self.is_speaking = True
@@ -259,7 +343,7 @@ class PDFVoiceReader:
         self.pause_btn.config(state=tk.NORMAL)
         self.stop_btn.config(state=tk.NORMAL)
         
-        self.status_var.set("Reproduciendo...")
+        self.status_var.set("🔊 Reproduciendo...")
         
         # Ejecutar en hilo separado para no bloquear la UI
         thread = threading.Thread(target=self._speak_text, args=(text,), daemon=True)
@@ -271,6 +355,10 @@ class PDFVoiceReader:
             # Limpiar texto de caracteres problemáticos
             clean_text = text.replace('\n', ' ').replace('\r', ' ')
             clean_text = ' '.join(clean_text.split())  # Normalizar espacios
+            
+            # Limitar longitud del texto para evitar problemas
+            if len(clean_text) > 5000:
+                clean_text = clean_text[:5000] + "..."
             
             self.engine.say(clean_text)
             self.engine.runAndWait()
@@ -285,25 +373,29 @@ class PDFVoiceReader:
         """Restaurar el estado de los botones después de terminar"""
         self.is_speaking = False
         self.is_paused = False
-        self.play_btn.config(state=tk.NORMAL)
+        if self.voice_available:
+            self.play_btn.config(state=tk.NORMAL)
         self.pause_btn.config(state=tk.DISABLED)
         self.stop_btn.config(state=tk.DISABLED)
-        self.status_var.set("Reproducción completada")
+        self.status_var.set("✅ Reproducción completada")
         
     def pause_resume(self):
         """Pausar o reanudar la reproducción"""
+        if not self.voice_available:
+            return
+            
         if self.is_speaking:
             if not self.is_paused:
                 # Pausar
                 self.engine.stop()
                 self.is_paused = True
                 self.pause_btn.config(text="▶️ Reanudar")
-                self.status_var.set("Pausado")
+                self.status_var.set("⏸️ Pausado")
             else:
                 # Reanudar
                 self.is_paused = False
                 self.pause_btn.config(text="⏸️ Pausar")
-                self.status_var.set("Reproduciendo...")
+                self.status_var.set("🔊 Reproduciendo...")
                 # Reiniciar desde donde se pausó
                 thread = threading.Thread(target=self._speak_text, 
                                         args=(self.current_text,), daemon=True)
@@ -311,84 +403,110 @@ class PDFVoiceReader:
                 
     def stop_reading(self):
         """Detener la reproducción"""
+        if not self.voice_available:
+            return
+            
         if self.is_speaking:
             self.engine.stop()
             self._reset_buttons()
             self.pause_btn.config(text="⏸️ Pausar")
-            self.status_var.set("Reproducción detenida")
+            self.status_var.set("⏹️ Reproducción detenida")
             
     def start_clipboard_monitor(self):
-        """Iniciar el monitoreo del portapapeles"""
-        self.monitor_clipboard()
+        """Iniciar el monitoreo del portapapeles en un hilo separado"""
+        def monitor_worker():
+            while self.clipboard_monitor_active:
+                try:
+                    current_clipboard = pyperclip.paste()
+                    
+                    # Si hay nuevo contenido en el portapapeles y no está vacío
+                    if (current_clipboard != self.last_clipboard and 
+                        current_clipboard.strip() and 
+                        len(current_clipboard.strip()) > 10):  # Mínimo 10 caracteres
+                        
+                        self.last_clipboard = current_clipboard
+                        # Ejecutar en el hilo principal
+                        self.root.after(0, lambda text=current_clipboard: self.show_floating_button(text))
+                        
+                except Exception as e:
+                    print(f"Error en monitoreo de portapapeles: {e}")
+                
+                time.sleep(0.5)  # Verificar cada 500ms
         
-    def monitor_clipboard(self):
-        """Monitorear cambios en el portapapeles"""
-        if not self.clipboard_monitor_active:
-            return
-            
-        try:
-            current_clipboard = pyperclip.paste()
-            
-            # Si hay nuevo contenido en el portapapeles y no está vacío
-            if (current_clipboard != self.last_clipboard and 
-                current_clipboard.strip() and 
-                len(current_clipboard.strip()) > 5):  # Mínimo 5 caracteres
-                
-                self.last_clipboard = current_clipboard
-                self.show_floating_button(current_clipboard)
-                
-        except Exception as e:
-            pass  # Ignorar errores del portapapeles
-            
-        # Programar la próxima verificación
-        self.root.after(500, self.monitor_clipboard)
+        # Iniciar el hilo de monitoreo
+        self.clipboard_thread = threading.Thread(target=monitor_worker, daemon=True)
+        self.clipboard_thread.start()
         
     def show_floating_button(self, text):
         """Mostrar botón flotante para leer texto"""
         # Cerrar botón anterior si existe
         if self.floating_button:
-            self.floating_button.destroy()
+            try:
+                self.floating_button.destroy()
+            except:
+                pass
             
-        # Crear nueva ventana flotante
-        self.floating_button = tk.Toplevel(self.root)
-        self.floating_button.title("")
-        self.floating_button.geometry("120x50")
-        self.floating_button.resizable(False, False)
-        self.floating_button.attributes("-topmost", True)
-        self.floating_button.configure(bg='#3498db')
-        
-        # Remover decoraciones de ventana
-        self.floating_button.overrideredirect(True)
-        
-        # Posicionar en la esquina superior derecha
-        screen_width = self.floating_button.winfo_screenwidth()
-        self.floating_button.geometry(f"120x50+{screen_width-140}+50")
-        
-        # Botón para leer
-        read_btn = tk.Button(self.floating_button, text="🔊 Leer", 
-                            command=lambda: self.read_clipboard_text(text),
-                            font=('Arial', 10, 'bold'), bg='#2980b9', fg='white',
-                            relief=tk.FLAT, cursor='hand2')
-        read_btn.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
-        
-        # Botón para cerrar
-        close_btn = tk.Button(self.floating_button, text="✕", 
-                             command=self.close_floating_button,
-                             font=('Arial', 8), bg='#e74c3c', fg='white',
-                             relief=tk.FLAT, cursor='hand2', width=3)
-        close_btn.place(x=95, y=5, width=20, height=15)
-        
-        # Auto-cerrar después de 10 segundos
-        self.root.after(10000, self.close_floating_button)
+        try:
+            # Crear nueva ventana flotante
+            self.floating_button = tk.Toplevel(self.root)
+            self.floating_button.title("Leer Texto")
+            self.floating_button.geometry("140x60")
+            self.floating_button.resizable(False, False)
+            self.floating_button.attributes("-topmost", True)
+            self.floating_button.configure(bg='#3498db')
+            
+            # Remover decoraciones de ventana
+            self.floating_button.overrideredirect(True)
+            
+            # Posicionar en la esquina superior derecha
+            screen_width = self.floating_button.winfo_screenwidth()
+            self.floating_button.geometry(f"140x60+{screen_width-160}+50")
+            
+            # Frame principal
+            main_frame = tk.Frame(self.floating_button, bg='#3498db')
+            main_frame.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
+            
+            # Botón para leer
+            read_btn = tk.Button(main_frame, text="🔊 Leer Texto", 
+                                command=lambda: self.read_clipboard_text(text),
+                                font=('Arial', 10, 'bold'), bg='#2980b9', fg='white',
+                                relief=tk.FLAT, cursor='hand2')
+            read_btn.pack(fill=tk.X, pady=(0, 2))
+            
+            # Botón para cerrar
+            close_btn = tk.Button(main_frame, text="✕ Cerrar", 
+                                 command=self.close_floating_button,
+                                 font=('Arial', 8), bg='#e74c3c', fg='white',
+                                 relief=tk.FLAT, cursor='hand2')
+            close_btn.pack(fill=tk.X)
+            
+            # Actualizar barra de estado
+            self.status_var.set("🎯 Botón flotante mostrado - Texto listo para leer")
+            
+            # Auto-cerrar después de 15 segundos
+            self.root.after(15000, self.close_floating_button)
+            
+        except Exception as e:
+            print(f"Error creando botón flotante: {e}")
+            messagebox.showinfo("Texto Copiado", f"Texto listo para leer:\n{text[:100]}...")
         
     def read_clipboard_text(self, text):
         """Leer el texto del portapapeles"""
+        if not self.voice_available:
+            messagebox.showerror("Error", "Motor de voz no disponible")
+            return
+            
         # Detener cualquier reproducción actual
         if self.is_speaking:
             self.stop_reading()
+            time.sleep(0.5)  # Pequeña pausa
             
         # Cerrar botón flotante
         self.close_floating_button()
+        
+        # Mostrar texto en el área de texto
+        self.text_area.delete(1.0, tk.END)
+        self.text_area.insert(1.0, f"📋 Texto del Portapapeles:\n\n{text}")
         
         # Leer el texto
         self.start_speaking(text)
@@ -396,32 +514,68 @@ class PDFVoiceReader:
     def close_floating_button(self):
         """Cerrar el botón flotante"""
         if self.floating_button:
-            self.floating_button.destroy()
-            self.floating_button = None
-            
+            try:
+                self.floating_button.destroy()
+            except:
+                pass
+            finally:
+                self.floating_button = None
+                
     def on_closing(self):
         """Manejar el cierre de la aplicación"""
         self.clipboard_monitor_active = False
-        if self.is_speaking:
+        if self.voice_available and self.is_speaking:
             self.engine.stop()
         if self.floating_button:
-            self.floating_button.destroy()
+            try:
+                self.floating_button.destroy()
+            except:
+                pass
         self.root.destroy()
+
+def check_dependencies():
+    """Verificar que todas las dependencias estén instaladas"""
+    missing_deps = []
+    
+    try:
+        import pyttsx3
+    except ImportError:
+        missing_deps.append("pyttsx3")
+        
+    try:
+        import PyPDF2
+    except ImportError:
+        missing_deps.append("PyPDF2")
+        
+    try:
+        import pyperclip
+    except ImportError:
+        missing_deps.append("pyperclip")
+    
+    if missing_deps:
+        print("❌ ERROR: Faltan dependencias por instalar:")
+        for dep in missing_deps:
+            print(f"   • {dep}")
+        print("\n📦 Para instalar las dependencias ejecuta:")
+        print("   pip install " + " ".join(missing_deps))
+        print("\n🔧 O ejecuta el archivo install.bat si lo tienes")
+        input("\nPresiona Enter para salir...")
+        return False
+    
+    return True
 
 def main():
     """Función principal"""
+    print("🚀 Iniciando Lector de PDF en Voz Alta...")
+    print("📋 Verificando dependencias...")
+    
     # Verificar dependencias
-    try:
-        import pyttsx3
-        import PyPDF2
-        import pyperclip
-    except ImportError as e:
-        missing_module = str(e).split("'")[1]
-        print(f"Error: Falta instalar el módulo {missing_module}")
-        print("Ejecuta: pip install pyttsx3 PyPDF2 pyperclip")
-        input("Presiona Enter para salir...")
+    if not check_dependencies():
         return
         
+    print("✅ Todas las dependencias están instaladas")
+    print("🎤 Iniciando aplicación...")
+    
     # Crear y ejecutar aplicación
     root = tk.Tk()
     app = PDFVoiceReader(root)
@@ -429,8 +583,16 @@ def main():
     # Configurar el cierre de la aplicación
     root.protocol("WM_DELETE_WINDOW", app.on_closing)
     
+    print("✨ Aplicación iniciada correctamente")
+    print("💡 Mantén esta ventana de terminal abierta")
+    
     # Ejecutar aplicación
-    root.mainloop()
+    try:
+        root.mainloop()
+    except KeyboardInterrupt:
+        print("\n👋 Aplicación cerrada por el usuario")
+    except Exception as e:
+        print(f"❌ Error inesperado: {e}")
 
 if __name__ == "__main__":
     main()
