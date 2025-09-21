@@ -139,7 +139,9 @@ class PDFVoiceReader:
                                    font=('Arial', 10), bg='#34495e', fg='#bdc3c7')
         self.speed_label.pack(side=tk.RIGHT)
         
-        # Volumen
+        
+        
+        # Volumen 
         volume_frame = tk.Frame(voice_frame, bg='#34495e')
         volume_frame.pack(fill=tk.X, pady=5)
         
@@ -157,6 +159,17 @@ class PDFVoiceReader:
         self.volume_label = tk.Label(volume_frame, text="90%", 
                                     font=('Arial', 10), bg='#34495e', fg='#bdc3c7')
         self.volume_label.pack(side=tk.RIGHT)
+
+        # Selección de voz
+        voice_select_frame = tk.Frame(voice_frame, bg='#34495e')
+        voice_select_frame.pack(fill=tk.X, pady=5)
+        tk.Label(voice_select_frame, text="Voz:", font=('Arial', 10, 'bold'), bg='#34495e', fg='#ecf0f1').pack(side=tk.LEFT)
+        self.voice_var = tk.StringVar()
+        self.voice_combobox = ttk.Combobox(voice_select_frame, textvariable=self.voice_var, state="readonly", width=40)
+        self.voice_combobox.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(10, 10))
+        self.voice_combobox.bind("<<ComboboxSelected>>", self.change_voice)
+        
+        
         
         # Frame de controles de reproducción
         control_frame = tk.Frame(main_frame, bg='#2c3e50')
@@ -189,9 +202,7 @@ class PDFVoiceReader:
         info_frame.pack(fill=tk.X, pady=(0, 20))
         
         info_text = ("🔍 Estado del Monitoreo: ACTIVO\n"
-                    "Para leer cualquier texto:\n"
-                    "1. Selecciona texto en cualquier aplicación\n"
-                    "2. Copia el texto (Ctrl+C)\n"
+                    "1. Selecciona texto y Copia el texto (Ctrl+C)\n"
                     "3. Aparecerá automáticamente un botón flotante 'Leer'\n"
                     "4. Haz clic en el botón para escuchar el texto\n\n"
                     "💡 Consejo: Usa el botón 'Probar Portapapeles' para verificar")
@@ -240,23 +251,35 @@ class PDFVoiceReader:
         """Configurar las opciones iniciales del motor de voz"""
         if not self.voice_available:
             return
-            
         try:
             voices = self.engine.getProperty('voices')
-            if voices:
-                # Intentar usar una voz en español si está disponible
-                for voice in voices:
-                    if ('spanish' in voice.name.lower() or 
-                        'es-' in voice.id.lower() or 
-                        'helena' in voice.name.lower() or
-                        'sabina' in voice.name.lower()):
-                        self.engine.setProperty('voice', voice.id)
-                        break
-            
+            self.voices = voices
+            voice_names = [f"{v.name} ({v.id})" for v in voices]
+            self.voice_combobox['values'] = voice_names
+            # Seleccionar voz en español si existe
+            selected = 0
+            for idx, voice in enumerate(voices):
+                if ('spanish' in voice.name.lower() or 
+                    'es-' in voice.id.lower() or 
+                    'helena' in voice.name.lower() or
+                    'sabina' in voice.name.lower()):
+                    selected = idx
+                    break
+            self.voice_combobox.current(selected)
+            self.engine.setProperty('voice', voices[selected].id)
+            self.voice_var.set(voice_names[selected])
             self.engine.setProperty('rate', 200)
             self.engine.setProperty('volume', 0.9)
         except Exception as e:
             print(f"Error configurando voz: {e}")
+
+    def change_voice(self, event=None):
+        """Cambiar la voz del motor de voz"""
+        if not self.voice_available:
+            return
+        idx = self.voice_combobox.current()
+        if hasattr(self, 'voices') and 0 <= idx < len(self.voices):
+            self.engine.setProperty('voice', self.voices[idx].id)
         
     def update_speed(self, value):
         """Actualizar la velocidad de lectura"""
