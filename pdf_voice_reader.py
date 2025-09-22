@@ -14,7 +14,7 @@ class PDFVoiceReader:
     def __init__(self, root):
         self.root = root
         self.root.title("Lector de PDF en Voz Alta")
-        self.root.geometry("900x700")
+        self.root.geometry("725x700")
         self.root.configure(bg='#2c3e50')
         
         # Configurar el motor de voz
@@ -79,14 +79,46 @@ class PDFVoiceReader:
         style.configure('Custom.TButton', font=('Arial', 10, 'bold'))
         style.configure('Custom.TLabel', font=('Arial', 11), background='#2c3e50', foreground='white')
         
-        # Frame principal
-        main_frame = tk.Frame(self.root, bg='#2c3e50')
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        # ===== Scroll general (vertical y horizontal) =====
+        container = tk.Frame(self.root, bg='#2c3e50')
+        container.pack(fill=tk.BOTH, expand=True)
+
+        # Canvas con scroll
+        canvas = tk.Canvas(container, bg='#2c3e50', highlightthickness=0)
         
+        # Scrollbars
+        v_scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        h_scrollbar = ttk.Scrollbar(container, orient="horizontal", command=canvas.xview)
+        
+        scroll_frame = tk.Frame(canvas, bg='#2c3e50')
+
+        scroll_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(
+                scrollregion=canvas.bbox("all")
+            )
+        )
+
+        canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
+        canvas.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
+
+        # Empaquetar scrollbars y canvas
+        v_scrollbar.pack(side="right", fill="y")
+        h_scrollbar.pack(side="bottom", fill="x")
+        canvas.pack(side="left", fill="both", expand=True)
+        
+        
+        
+        
+
+        # Ahora usamos scroll_frame en lugar de self.root como contenedor
+        main_frame = scroll_frame
+
+        # ============================
         # Título
         title_label = tk.Label(main_frame, text="📚 Lector de PDF en Voz Alta", 
-                              font=('Arial', 20, 'bold'), 
-                              bg='#2c3e50', fg='#ecf0f1')
+                            font=('Arial', 20, 'bold'), 
+                            bg='#2c3e50', fg='#ecf0f1')
         title_label.pack(pady=(0, 20))
         
         # Frame de controles de archivo
@@ -413,13 +445,12 @@ class PDFVoiceReader:
                 self.engine.stop()
                 self.is_paused = True
                 self.pause_btn.config(text="▶️ Reanudar")
-                self.status_var.set("⏸️ Pausado")
+                self.status_var.set("⏸️ Pausado - Al reanudar, se reiniciará la lectura")
             else:
-                # Reanudar
+                # Reanudar desde el principio (limitación de pyttsx3)
                 self.is_paused = False
                 self.pause_btn.config(text="⏸️ Pausar")
-                self.status_var.set("🔊 Reproduciendo...")
-                # Reiniciar desde donde se pausó
+                self.status_var.set("🔊 Reanudando desde el inicio...")
                 thread = threading.Thread(target=self._speak_text, 
                                         args=(self.current_text,), daemon=True)
                 thread.start()
@@ -522,7 +553,8 @@ class PDFVoiceReader:
         # Detener cualquier reproducción actual
         if self.is_speaking:
             self.stop_reading()
-            time.sleep(0.5)  # Pequeña pausa
+            # Esperar a que el motor se detenga realmente
+            time.sleep(0.3)
             
         # Cerrar botón flotante
         self.close_floating_button()
@@ -531,8 +563,15 @@ class PDFVoiceReader:
         self.text_area.delete(1.0, tk.END)
         self.text_area.insert(1.0, f"📋 Texto del Portapapeles:\n\n{text}")
         
+        # ¡IMPORTANTE! Asignar este texto como el actual, para que los controles funcionen
+        self.current_text = text
+        
         # Leer el texto
         self.start_speaking(text)
+        
+        
+        
+        
         
     def close_floating_button(self):
         """Cerrar el botón flotante"""
